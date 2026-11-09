@@ -29,6 +29,42 @@
           padding: 7px 11px; font-size: 12px; cursor: pointer; }
   #toolbar button:hover { background: rgba(60,64,74,.95); }
   #hint { position: absolute; bottom: 10px; left: 12px; font-size: 12px; color: #ddd; background: rgba(0,0,0,.5); padding: 6px 10px; border-radius: 6px; }
+  #view canvas { touch-action: none; }
+
+  /* ---------- mobile / portrait ---------- */
+  @media (max-width: 820px), (orientation: portrait) and (max-width: 1024px) {
+    #app { flex-direction: column; height: 100vh; height: 100dvh; }
+    #view { flex: none; height: 56vh; height: 56dvh; order: 1; }
+    #side { order: 2; width: 100%; flex: 1; min-height: 0; padding: 10px 12px 18px; border-right: none; border-top: 1px solid #353944; }
+    h1 { font-size: 16px; }
+    .sub { font-size: 11.5px; margin-bottom: 6px; }
+    #list { display: flex; gap: 8px; overflow-x: auto; scroll-snap-type: x mandatory; padding-bottom: 6px; -webkit-overflow-scrolling: touch; }
+    .dbtn { flex: 0 0 72%; max-width: 260px; margin: 0; scroll-snap-align: start; padding: 8px 10px; font-size: 11.5px; }
+    .dbtn b { font-size: 13px; }
+    #info { margin-top: 8px; padding-top: 8px; }
+    #info h2 { font-size: 15px; }
+    #info p { font-size: 13px; }
+    #toolbar { top: 8px; left: 8px; right: 8px; flex-wrap: nowrap; overflow-x: auto; padding-bottom: 2px; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+    #toolbar::-webkit-scrollbar { display: none; }
+    #toolbar button, #toolbar label { flex: 0 0 auto; padding: 8px 10px; font-size: 12px; white-space: nowrap; }
+    #hint { font-size: 10.5px; bottom: 6px; left: 8px; right: 8px; text-align: center; }
+    #hint .desk { display: none; }
+  }
+  @media (min-width: 821px) { #hint .mob { display: none; } }
+  @media (orientation: portrait) and (min-width: 821px) and (max-width: 1024px) { #hint .mob { display: inline; } #hint .desk { display: none; } }
+  @media (max-height: 500px) and (orientation: landscape) {
+    #side { width: 250px; padding: 10px; }
+    h1 { font-size: 15px; }
+    .sub { font-size: 11px; }
+    .dbtn { padding: 6px 8px; font-size: 11px; }
+    .dbtn b { font-size: 12px; }
+    #toolbar { top: 6px; left: 6px; right: 6px; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+    #toolbar::-webkit-scrollbar { display: none; }
+    #toolbar button, #toolbar label { flex: 0 0 auto; padding: 5px 8px; font-size: 11px; white-space: nowrap; }
+    #hint { font-size: 10.5px; bottom: 4px; }
+    #hint .desk { display: none; }
+    #hint .mob { display: inline; }
+  }
 </style>
 </head>
 <body>
@@ -59,7 +95,7 @@
       <label><input type="checkbox" id="lbl" checked> Labels</label>
       <button id="shot">Save image</button>
     </div>
-    <div id="hint">Left-drag: rotate &middot; Right-drag: pan &middot; Scroll: zoom &middot; 1 unit = 1 ft</div>
+    <div id="hint"><span class="desk">Left-drag: rotate &middot; Right-drag: pan &middot; Scroll: zoom &middot; 1 unit = 1 ft</span><span class="mob">1 finger: rotate &middot; 2 fingers: zoom / pan &middot; tap a design card to switch</span></div>
   </div>
 </div>
 
@@ -1019,6 +1055,7 @@ function load(i) {
   designs[i].build();
   addLabels();
   [...list.children].forEach((b, j) => b.classList.toggle('active', j === i));
+  list.children[i].scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
   const d = designs[i];
   info.innerHTML = `<h2>${i + 1}. ${d.name}</h2><p>${d.desc}</p><ul>${d.features.map(f => `<li>${f}</li>`).join('')}</ul>
     <div>${d.palette.map(c => `<span class="sw" style="background:${c}" title="${c}"></span>`).join('')}</div>`;
@@ -1031,9 +1068,15 @@ const VIEWS = {
   living: { p: [-2.6, 5.6, 36.5], t: [0.5, 3, 22] },
   top: { p: [0, 58, 20.01], t: [0, 0, 20] },
 };
+let currentView = 'overview';
 function setView(name) {
+  currentView = name;
   const v = VIEWS[name];
-  camera.position.set(...v.p); controls.target.set(...v.t); controls.update();
+  const a = camera.aspect;
+  // Pull back on narrow (portrait) screens so the whole space fits.
+  const m = (name === 'overview' || name === 'top') ? (a < 0.75 ? 1.45 : a < 1.1 ? 1.2 : 1) : 1;
+  const p = v.p.map((c, i) => v.t[i] + (c - v.t[i]) * m);
+  camera.position.set(...p); controls.target.set(...v.t); controls.update();
 }
 document.querySelectorAll('#toolbar [data-view]').forEach(b => b.onclick = () => setView(b.dataset.view));
 document.getElementById('lbl').onchange = e => { if (labels) labels.visible = e.target.checked; };
@@ -1043,11 +1086,19 @@ document.getElementById('shot').onclick = () => {
   a.href = renderer.domElement.toDataURL('image/png'); a.click();
 };
 
+let lastAspect = 0;
 function resize() {
   const w = view.clientWidth, h = view.clientHeight;
-  renderer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix();
+  if (!w || !h) return;
+  renderer.setSize(w, h); camera.aspect = w / h;
+  camera.fov = camera.aspect < 0.75 ? 68 : camera.aspect < 1.1 ? 60 : 50;
+  camera.updateProjectionMatrix();
+  // Re-frame only when crossing between portrait and landscape, so user orbiting isn't reset.
+  if (lastAspect && (lastAspect < 1) !== (camera.aspect < 1)) setView(currentView);
+  lastAspect = camera.aspect;
 }
 window.addEventListener('resize', resize);
+new ResizeObserver(resize).observe(view);
 resize();
 load(0);
 setView('overview');
